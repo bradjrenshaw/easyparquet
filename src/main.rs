@@ -1,8 +1,10 @@
 use dotenvy;
 use easyparquet::{Config, run};
 use std::process;
+use tokio;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     //Detect parsing errors in the .env file only.
     if let Err(e @ dotenvy::Error::LineParse(..)) = dotenvy::dotenv() {
         println!("Error parsing .env file\n{e}");
@@ -14,7 +16,7 @@ fn main() {
         process::exit(1);
     });
 
-    if let Err(e) = run(config) {
+    if let Err(e) = run(config).await {
         eprintln!("{e}");
         process::exit(1);
     }
