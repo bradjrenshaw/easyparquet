@@ -2,11 +2,12 @@ use dotenvy;
 
 #[derive(Debug)]
 pub struct Config {
-    database_host: String,
-    database_port: u16,
-    database_user: String,
-    database_password: String,
-    database_tables: Vec<String>,
+    pub database_host: String,
+    pub database_port: u16,
+    pub database_user: String,
+    pub database_password: String,
+    pub database_name: String,
+    pub database_tables: Vec<String>,
 }
 
 fn get_env(key: &str) -> Result<String, String> {
@@ -17,17 +18,19 @@ fn get_env(key: &str) -> Result<String, String> {
 }
 
 impl Config {
+
     pub fn build() -> Result<Config, String> {
         let database_host = get_env("database_host")?;
         let database_port: u16 = match get_env("database_port") {
             Ok(e) => match e.parse() {
                 Ok(f) => f,
-                Err(e) => return Err("Server port must be a valid port.".to_string()),
+                Err(_) => return Err("Server port must be a valid port.".to_string()),
             },
             Err(_) => 3306, //Default port
         };
         let database_user = get_env("database_user")?;
         let database_password = get_env("database_password")?;
+        let database_name = get_env("database_name")?;
         let database_tables = get_env("database_tables")?
             .split(";")
             .filter_map(|s| {
@@ -40,7 +43,12 @@ impl Config {
             database_port,
             database_user,
             database_password,
+            database_name,
             database_tables,
         })
+    }
+
+    pub fn get_uri(&self) -> String {
+                format!("mysql://{}:{}@{}:{}/{}", self.database_user, self.database_password, self.database_host, self.database_port, self.database_name)
     }
 }
