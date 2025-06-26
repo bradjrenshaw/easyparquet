@@ -4,6 +4,8 @@ use std::error::Error;
 use mysql_async::prelude::*;
 use mysql_async::Row;
 use futures::StreamExt;
+mod columns;
+use columns::Column;
 
 #[derive(Debug)]
 pub struct TableBackup {
@@ -17,18 +19,21 @@ impl TableBackup {
         let mut conn = pool.get_conn().await?;
         let query = format!("SELECT * FROM {}", self.table_name);
         let mut stream = conn.exec_stream(query, mysql_async::Params::Empty).await?;
+      let mut columns = Vec::new();
 
         for column in stream.columns().iter() {
-            println!("Column: {}", column.name_str());
+          let col = Column::from_mysql_type(column.column_type())?;
+          columns.push(col);
         }
 
           while let Some(row_result) = stream.next().await {
-            println!("Row");
       let row: Row = row_result?;
-      for v in row.unwrap() {
-        println!("{v:?}")
+      for (i, v) in row.unwrap().into_iter().enumerate() {
+        Column::push(&mut columns[i], v)?;
       }
           }
+
+          
         Ok(())
     }
 }
