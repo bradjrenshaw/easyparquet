@@ -1,4 +1,5 @@
 //This is a prototype and will be significantly optimized
+use super::Column;
 use anyhow::Result;
 use arrow::array::Array;
 use arrow::datatypes::Schema;
@@ -7,8 +8,8 @@ use mysql_async::Row;
 use mysql_async::prelude::*;
 use parquet::arrow::ArrowWriter;
 use std::sync::Arc;
-use super::Column;
 
+///Reads a table from the specified database and writes it to a parquet file.
 #[derive(Debug)]
 pub struct TableBackup {
     pub table_name: String,
@@ -16,14 +17,13 @@ pub struct TableBackup {
 }
 
 impl TableBackup {
-
     pub fn new(table_name: String, output_file_path: String) -> TableBackup {
         TableBackup {
             table_name,
-        output_file_path
+            output_file_path,
         }
     }
-    
+
     pub async fn execute(&self, pool: mysql_async::Pool) -> Result<()> {
         let mut conn = pool.get_conn().await?;
         let query = format!("SELECT * FROM {}", self.table_name);
@@ -58,11 +58,7 @@ impl TableBackup {
         Ok(())
     }
 
-    pub async fn write(
-        &self,
-        batch: arrow::array::RecordBatch,
-        schema: Arc<Schema>,
-    ) -> Result<()> {
+    pub async fn write(&self, batch: arrow::array::RecordBatch, schema: Arc<Schema>) -> Result<()> {
         let file = std::fs::File::create(&self.output_file_path).unwrap();
         tokio::task::spawn_blocking(move || {
             let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();

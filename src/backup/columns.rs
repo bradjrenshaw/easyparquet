@@ -1,9 +1,9 @@
+use anyhow::{Result, bail};
 use arrow::array::Array;
 use arrow::datatypes::{DataType, Field};
 use mysql_async::Value;
 use mysql_async::consts::ColumnType as mysql_column_type;
 use std::sync::Arc;
-use anyhow::{Result, bail};
 
 //Enums are used here instead of dyn/fat pointers for performance
 
@@ -94,9 +94,38 @@ impl ColumnBuilder for Int64ColumnBuilder {
     }
 }
 
+pub struct FloatColumnBuilder {
+    builder: arrow::array::Float32Builder,
+}
+
+impl FloatColumnBuilder {
+    fn new() -> FloatColumnBuilder {
+        FloatColumnBuilder {
+            builder: arrow::array::Float32Builder::new(),
+        }
+    }
+}
+
+impl ColumnBuilder for FloatColumnBuilder {
+    fn finish(mut self) -> Arc<dyn Array> {
+        Arc::new(self.builder.finish())
+    }
+
+    fn push_null(&mut self) {
+        self.builder.append_null();
+    }
+
+    fn push_value(&mut self, value: mysql_async::Value) {
+        if let mysql_async::Value::Float(value) = value {
+            self.builder.append_value(value);
+        }
+    }
+}
+
 pub enum Column {
     String(ColumnData<StringColumnBuilder>),
     Int64(ColumnData<Int64ColumnBuilder>),
+    Float(ColumnData<FloatColumnBuilder>),
 }
 
 impl Column {
@@ -104,6 +133,7 @@ impl Column {
         match self {
             Column::String(data) => data.finish(),
             Column::Int64(data) => data.finish(),
+            Column::Float(data) => data.finish(),
         }
     }
 
@@ -123,6 +153,11 @@ impl Column {
                 let field = Field::new(name, DataType::Utf8, nullable);
                 Ok((column, field))
             }
+            mysql_column_type::MYSQL_TYPE_FLOAT => {
+                let column = Column::Float(ColumnData::new(nullable, FloatColumnBuilder::new()));
+                let field = Field::new(name, DataType::Float32, nullable);
+                Ok((column, field))
+            }
             _ => bail!("Unsupported column type".to_string()),
         }
     }
@@ -134,6 +169,10 @@ impl Column {
                 Ok(())
             }
             Column::Int64(data) => {
+                data.push(value);
+                Ok(())
+            }
+            Column::Float(data) => {
                 data.push(value);
                 Ok(())
             }

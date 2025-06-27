@@ -1,15 +1,17 @@
-use std::{collections::HashSet};
 use super::TableBackup;
 use anyhow::{Result, bail};
+use std::collections::HashSet;
 
+///Simultaneously backs up multiple databases to their associated. parquet files.
 pub struct BatchBackup {
-    tables: HashSet<String>
+    tables: HashSet<String>,
 }
 
 impl BatchBackup {
-
     pub fn new() -> BatchBackup {
-        BatchBackup {tables: HashSet::new()}
+        BatchBackup {
+            tables: HashSet::new(),
+        }
     }
 
     pub fn add_table(&mut self, name: String) {
@@ -24,20 +26,16 @@ impl BatchBackup {
             let output_file_path = format!("{}.parquet", table_name);
             let backup = TableBackup::new(table_name, output_file_path);
             let pool = pool.clone();
-            task_set.spawn(async move {
-                backup.execute(pool).await
-            });
+            task_set.spawn(async move { backup.execute(pool).await });
         }
 
         while let Some(result) = task_set.join_next().await {
             match result {
-                Ok(result) => {
-                    match result {
-                        Ok(()) => continue,
-                        Err(e) => {
-                            task_set.abort_all();
-                            bail!("{e}")
-                        }
+                Ok(result) => match result {
+                    Ok(()) => continue,
+                    Err(e) => {
+                        task_set.abort_all();
+                        bail!("{e}")
                     }
                 },
                 Err(e) => {
@@ -48,4 +46,4 @@ impl BatchBackup {
         }
         Ok(())
     }
-    }
+}
