@@ -1,8 +1,8 @@
 use std::error::Error;
-mod config;
 mod backup;
-pub use config::Config;
+mod config;
 pub use backup::TableBackup;
+pub use config::Config;
 
 pub async fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let url = config.get_uri();

@@ -18,7 +18,6 @@ fn get_env(key: &str) -> Result<String, String> {
 }
 
 impl Config {
-
     pub fn build() -> Result<Config, String> {
         let database_host = get_env("database_host")?;
         let database_port: u16 = match get_env("database_port") {
@@ -49,6 +48,13 @@ impl Config {
     }
 
     pub fn get_uri(&self) -> String {
-                format!("mysql://{}:{}@{}:{}/{}", self.database_user, self.database_password, self.database_host, self.database_port, self.database_name)
+        format!(
+            "mysql://{}:{}@{}:{}/{}",
+            self.database_user,
+            self.database_password,
+            self.database_host,
+            self.database_port,
+            self.database_name
+        )
     }
 }
