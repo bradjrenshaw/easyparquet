@@ -3,6 +3,7 @@ use arrow::datatypes::{DataType, Field};
 use mysql_async::Value;
 use mysql_async::consts::ColumnType as mysql_column_type;
 use std::sync::Arc;
+use anyhow::{Result, bail};
 
 //Enums are used here instead of dyn/fat pointers for performance
 
@@ -110,7 +111,7 @@ impl Column {
         name: String,
         nullable: bool,
         column_type: mysql_column_type,
-    ) -> Result<(Column, Field), String> {
+    ) -> Result<(Column, Field)> {
         match column_type {
             mysql_column_type::MYSQL_TYPE_LONG => {
                 let column = Column::Int64(ColumnData::new(nullable, Int64ColumnBuilder::new()));
@@ -122,11 +123,11 @@ impl Column {
                 let field = Field::new(name, DataType::Utf8, nullable);
                 Ok((column, field))
             }
-            _ => Err("Unsupported column type".to_string()),
+            _ => bail!("Unsupported column type".to_string()),
         }
     }
 
-    pub fn push(column: &mut Column, value: Value) -> Result<(), String> {
+    pub fn push(column: &mut Column, value: Value) -> Result<()> {
         match column {
             Column::String(data) => {
                 data.push(value);
