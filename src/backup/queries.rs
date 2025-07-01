@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use arrow::array::Array;
 use arrow::{array::RecordBatch, datatypes::Schema};
+use async_trait::async_trait;
 use mysql_async::{Conn, Pool, ResultSetStream, Row};
 use mysql_async::prelude::*;
 use parquet::arrow::ArrowWriter;
@@ -12,14 +13,19 @@ use crate::backup::columns::ColumnData;
 
 use super::Column;
 
-pub trait DataReader {
-    async fn read(&self, writer: Box<dyn DataWriter>) -> Result<()>;
+#[async_trait]
+pub trait DataReader: Send + Sync {
+    async fn read(&self, writerFactory: Box<dyn DataWriterFactory>) -> Result<()>;
 }
 
-pub trait DataWriter: Send {
+pub trait DataWriter {
     fn setup(&mut self, schema: Arc<Schema>) -> Result<()>;
     fn write(&mut self, batch: &RecordBatch) -> Result<()>;
     fn finish(&mut self) -> Result<()>;
+}
+
+pub trait DataWriterFactory: Send + Sync {
+    fn create(&self) -> Box<dyn DataWriter>;
 }
 
 pub struct MysqlReader {
@@ -37,9 +43,10 @@ impl MysqlReader {
     }
 }
 
+#[async_trait]
 impl DataReader for MysqlReader {
 
-    async fn read(&self, mut writer: Box<dyn DataWriter>) -> Result<()> {
+    async fn read(&self, mut writerFactory: Box<dyn DataWriterFactory>) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!("SELECT * FROM {}", self.table_name);
                 let mut stream = conn.exec_stream(query, mysql_async::Params::Empty).await?;
@@ -59,7 +66,6 @@ impl DataReader for MysqlReader {
         }
 
         let schema = Arc::new(Schema::new(schema_vec));
-        writer.setup(schema.clone())?;
 
         while let Some(row_result) = stream.next().await {
             let row: Row = row_result?;
@@ -73,6 +79,8 @@ impl DataReader for MysqlReader {
         let batch = arrow::array::RecordBatch::try_new(schema.clone(), batch_vec)?;
 
     tokio::task::spawn_blocking(move || {
+                let mut writer = writerFactory.create();
+        writer.setup(schema.clone())?;
         writer.write(&batch)?;
         writer.finish()
     }).await??;
@@ -122,4 +130,23 @@ impl DataWriter for ParquetWriter {
         }
         Ok(())
      }
+}
+
+pub struct ParquetWriterFactory {
+    file_path: String,
+}
+
+impl ParquetWriterFactory {
+
+    pub fn new(file_path: String) -> Self {
+        Self {file_path}
+    }
+}
+
+impl DataWriterFactory for ParquetWriterFactory {
+
+    fn create(&self) -> Box<dyn DataWriter> {
+        Box::new(ParquetWriter::new(self.file_path.clone()))
+    }
+
 }

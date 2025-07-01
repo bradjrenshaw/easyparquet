@@ -1,3 +1,5 @@
+use crate::backup::queries::{MysqlReader, ParquetWriter, ParquetWriterFactory};
+
 use super::TableBackup;
 use anyhow::{Result, bail};
 use std::collections::HashSet;
@@ -24,9 +26,15 @@ impl BatchBackup {
         for name in self.tables.iter() {
             let table_name = name.clone();
             let output_file_path = format!("{}.parquet", table_name);
-            let backup = TableBackup::new(table_name, output_file_path);
             let pool = pool.clone();
-            task_set.spawn(async move { backup.execute(pool).await });
+
+
+            task_set.spawn(async move{
+                            let backup = TableBackup::new(table_name.clone(), output_file_path.clone());
+                            let reader = Box::new(MysqlReader::new(pool, table_name.clone()));
+            let writer = Box::new(ParquetWriterFactory::new(output_file_path.clone()));
+                 backup.execute(reader, writer).await
+                });
         }
 
         while let Some(result) = task_set.join_next().await {
