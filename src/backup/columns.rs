@@ -6,21 +6,48 @@ use mysql_async::consts::ColumnType as mysql_column_type;
 use std::sync::Arc;
 
 //Enums are used here instead of dyn/fat pointers for performance
-
 pub trait ColumnBuilder {
     fn finish(self) -> Arc<dyn Array>;
     fn push_null(&mut self);
     fn push_value(&mut self, value: Value);
 }
 
-pub struct ColumnData<T: ColumnBuilder> {
+pub struct ColumnData {
+    name: String,
     nullable: bool,
+    column_type: mysql_column_type,
+    arrow_type: DataType
+}
+
+impl ColumnData {
+
+    pub fn get_arrow_type(column_type: mysql_column_type) -> Result<DataType> {
+        match column_type {
+                mysql_column_type::MYSQL_TYPE_VAR_STRING => Ok(DataType::Utf8),
+                mysql_column_type::MYSQL_TYPE_LONG => Ok(DataType::Int64),
+                mysql_column_type::MYSQL_TYPE_FLOAT => Ok(DataType::Float32),
+                _ => bail!("No matching Arrow schema type for column.")
+        }
+    }
+
+    pub fn new(name: String, nullable: bool, column_type: mysql_column_type) -> Result<ColumnData> {
+        let arrow_type = ColumnData::get_arrow_type(column_type)?;
+        Ok(ColumnData {name, nullable, column_type, arrow_type})
+    }
+
+    pub fn get_schema_field(&self) -> Field {
+        Field::new(self.name.clone(), self.arrow_type.clone(), self.nullable)
+    }
+}
+
+pub struct ColumnHolder<T: ColumnBuilder> {
+    data: Arc<ColumnData>,
     builder: T,
 }
 
-impl<T: ColumnBuilder> ColumnData<T> {
-    pub fn new(nullable: bool, builder: T) -> ColumnData<T> {
-        ColumnData { nullable, builder }
+impl<T: ColumnBuilder> ColumnHolder<T> {
+    pub fn new(data: Arc<ColumnData>, builder: T) -> ColumnHolder<T> {
+        ColumnHolder { data, builder }
     }
 
     pub fn finish(self) -> Arc<dyn Array> {
@@ -28,7 +55,7 @@ impl<T: ColumnBuilder> ColumnData<T> {
     }
 
     pub fn push(&mut self, value: mysql_async::Value) {
-        if self.nullable {
+        if self.data.nullable {
             if let mysql_async::Value::NULL = value {
                 self.builder.push_null();
             }
@@ -123,9 +150,9 @@ impl ColumnBuilder for FloatColumnBuilder {
 }
 
 pub enum Column {
-    String(ColumnData<StringColumnBuilder>),
-    Int64(ColumnData<Int64ColumnBuilder>),
-    Float(ColumnData<FloatColumnBuilder>),
+    String(ColumnHolder<StringColumnBuilder>),
+    Int64(ColumnHolder<Int64ColumnBuilder>),
+    Float(ColumnHolder<FloatColumnBuilder>),
 }
 
 impl Column {
@@ -137,26 +164,19 @@ impl Column {
         }
     }
 
-    pub fn from_mysql_type(
-        name: String,
-        nullable: bool,
-        column_type: mysql_column_type,
-    ) -> Result<(Column, Field)> {
-        match column_type {
+    pub fn from_data(data: Arc<ColumnData>) -> Result<Column> {
+        match data.column_type {
             mysql_column_type::MYSQL_TYPE_LONG => {
-                let column = Column::Int64(ColumnData::new(nullable, Int64ColumnBuilder::new()));
-                let field = Field::new(name, DataType::Int64, nullable);
-                Ok((column, field))
+                let column = Column::Int64(ColumnHolder::new(data, Int64ColumnBuilder::new()));
+                Ok(column)
             }
             mysql_column_type::MYSQL_TYPE_VAR_STRING => {
-                let column = Column::String(ColumnData::new(nullable, StringColumnBuilder::new()));
-                let field = Field::new(name, DataType::Utf8, nullable);
-                Ok((column, field))
+                let column = Column::String(ColumnHolder::new(data, StringColumnBuilder::new()));
+                Ok(column)
             }
             mysql_column_type::MYSQL_TYPE_FLOAT => {
-                let column = Column::Float(ColumnData::new(nullable, FloatColumnBuilder::new()));
-                let field = Field::new(name, DataType::Float32, nullable);
-                Ok((column, field))
+                let column = Column::Float(ColumnHolder::new(data, FloatColumnBuilder::new()));
+                Ok(column)
             }
             _ => bail!("Unsupported column type".to_string()),
         }
@@ -164,16 +184,16 @@ impl Column {
 
     pub fn push(column: &mut Column, value: Value) -> Result<()> {
         match column {
-            Column::String(data) => {
-                data.push(value);
+            Column::String(holder) => {
+                holder.push(value);
                 Ok(())
             }
-            Column::Int64(data) => {
-                data.push(value);
+            Column::Int64(holder) => {
+                holder.push(value);
                 Ok(())
             }
-            Column::Float(data) => {
-                data.push(value);
+            Column::Float(holder) => {
+                holder.push(value);
                 Ok(())
             }
         }

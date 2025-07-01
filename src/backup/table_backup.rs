@@ -1,4 +1,8 @@
+use crate::backup::columns::ColumnData;
+
 //This is a prototype and will be significantly optimized
+// Todo: Needs to read data in chunks and better abstract out various functions for testing and better structure
+// Todo: Better handling of error states (graceful recovery) and fewer unchecked .unwrap() calls
 use super::Column;
 use anyhow::Result;
 use arrow::array::Array;
@@ -36,8 +40,11 @@ impl TableBackup {
             let nullable = column
                 .flags()
                 .contains(mysql_async::consts::ColumnFlags::NOT_NULL_FLAG);
-            let (col, field) = Column::from_mysql_type(name, nullable, column.column_type())?;
-            schema_vec.push(field);
+            let column_type = column.column_type();
+            let data = Arc::new(ColumnData::new(name, nullable, column_type)?);
+            let col = Column::from_data(data.clone())?;
+
+            schema_vec.push(data.get_schema_field());
             columns.push(col);
         }
 

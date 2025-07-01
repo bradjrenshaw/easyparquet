@@ -1,6 +1,8 @@
-mod batch_backup;
 mod columns;
 mod table_backup;
+mod batch_backup;
+mod queries;
 pub use batch_backup::BatchBackup;
-use columns::Column;
+use queries::{DataReader, DataWriter, MysqlReader, ParquetWriter};
+use columns::{Column, ColumnData};
 pub use table_backup::TableBackup;
