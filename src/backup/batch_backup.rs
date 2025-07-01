@@ -1,4 +1,4 @@
-use crate::backup::queries::{MysqlReader, ParquetWriter, ParquetWriterFactory};
+use crate::backup::queries::{MysqlReader, ParquetWriterFactory};
 
 use super::TableBackup;
 use anyhow::{Result, bail};
@@ -28,13 +28,12 @@ impl BatchBackup {
             let output_file_path = format!("{}.parquet", table_name);
             let pool = pool.clone();
 
-
-            task_set.spawn(async move{
-                            let backup = TableBackup::new(table_name.clone(), output_file_path.clone());
-                            let reader = Box::new(MysqlReader::new(pool, table_name.clone()));
-            let writer = Box::new(ParquetWriterFactory::new(output_file_path.clone()));
-                 backup.execute(reader, writer).await
-                });
+            task_set.spawn(async move {
+                let backup = TableBackup::new();
+                let reader = Box::new(MysqlReader::new(pool, table_name.clone()));
+                let writer = Box::new(ParquetWriterFactory::new(output_file_path.clone()));
+                backup.execute(reader, writer).await
+            });
         }
 
         while let Some(result) = task_set.join_next().await {

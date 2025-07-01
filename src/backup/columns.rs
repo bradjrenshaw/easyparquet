@@ -16,23 +16,27 @@ pub struct ColumnData {
     name: String,
     nullable: bool,
     column_type: mysql_column_type,
-    arrow_type: DataType
+    arrow_type: DataType,
 }
 
 impl ColumnData {
-
     pub fn get_arrow_type(column_type: mysql_column_type) -> Result<DataType> {
         match column_type {
-                mysql_column_type::MYSQL_TYPE_VAR_STRING => Ok(DataType::Utf8),
-                mysql_column_type::MYSQL_TYPE_LONG => Ok(DataType::Int64),
-                mysql_column_type::MYSQL_TYPE_FLOAT => Ok(DataType::Float32),
-                _ => bail!("No matching Arrow schema type for column.")
+            mysql_column_type::MYSQL_TYPE_VAR_STRING => Ok(DataType::Utf8),
+            mysql_column_type::MYSQL_TYPE_LONG => Ok(DataType::Int64),
+            mysql_column_type::MYSQL_TYPE_FLOAT => Ok(DataType::Float32),
+            _ => bail!("No matching Arrow schema type for column."),
         }
     }
 
     pub fn new(name: String, nullable: bool, column_type: mysql_column_type) -> Result<ColumnData> {
         let arrow_type = ColumnData::get_arrow_type(column_type)?;
-        Ok(ColumnData {name, nullable, column_type, arrow_type})
+        Ok(ColumnData {
+            name,
+            nullable,
+            column_type,
+            arrow_type,
+        })
     }
 
     pub fn get_schema_field(&self) -> Field {
