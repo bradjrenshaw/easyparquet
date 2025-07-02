@@ -7,6 +7,7 @@ use futures::StreamExt;
 use mysql_async::prelude::*;
 use mysql_async::{Pool, Row};
 use parquet::arrow::ArrowWriter;
+use tokio::sync::mpsc;
 use std::fs::File;
 use std::sync::Arc;
 
@@ -41,26 +42,41 @@ impl MysqlReader {
     }
 }
 
+enum WriteMessage {
+    Chunk(RecordBatch),
+    Finish,
+    Error,
+}
+
+impl MysqlReader {
+
+    fn get_columns(columns: &Vec<Arc<ColumnData>>) -> Vec<Column> {
+        columns.iter().map(|data| Column::from_data(data.clone()).unwrap()).collect()
+    }
+}
+
 #[async_trait]
 impl DataReader for MysqlReader {
     async fn read(&self, writer_factory: Box<dyn DataWriterFactory>) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!("SELECT * FROM {}", self.table_name);
         let mut stream = conn.exec_stream(query, mysql_async::Params::Empty).await?;
-        let mut columns = Vec::new();
+        let mut column_data = Vec::new();
 
         let mut schema_vec = Vec::new();
         for column in stream.columns().iter() {
             let name = column.name_str().into_owned();
+                        //Note that the not_null flag means null is not allowed (mysql NOT NULL) so it needs to be inverted for Arrow nullable
             let nullable = !column
                 .flags()
                 .contains(mysql_async::consts::ColumnFlags::NOT_NULL_FLAG);
             let column_type = column.column_type();
             let data = Arc::new(ColumnData::new(name, nullable, column_type)?);
-            let col = Column::from_data(data.clone())?;
             schema_vec.push(data.get_schema_field());
-            columns.push(col);
+            column_data.push(data);
         }
+
+        let mut columns = MysqlReader::get_columns(&column_data);
 
         let schema = Arc::new(Schema::new(schema_vec));
 
@@ -75,13 +91,25 @@ impl DataReader for MysqlReader {
 
         let batch = arrow::array::RecordBatch::try_new(schema.clone(), batch_vec)?;
 
-        tokio::task::spawn_blocking(move || {
+        let (tx, mut rx) = mpsc::channel(100);
+
+        let join_handle = tokio::task::spawn_blocking(move || {
             let mut writer = writer_factory.create();
             writer.setup(schema.clone())?;
-            writer.write(&batch)?;
+            while let Some(message) = rx.blocking_recv() {
+                match message {
+            WriteMessage::Chunk(batch) => writer.write(&batch)?,
+            WriteMessage::Finish => break,
+            WriteMessage::Error => bail!("Error in another task")
+                }
+            }
             writer.finish()
-        })
-        .await??;
+        });
+
+        tx.send(WriteMessage::Chunk(batch)).await?;
+        tx.send(WriteMessage::Finish).await?;
+        drop(tx);
+        join_handle.await??;
         Ok(())
     }
 }
