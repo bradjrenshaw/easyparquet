@@ -8,7 +8,7 @@ use mysql_async::prelude::*;
 use mysql_async::{Pool, Row};
 use parquet::arrow::ArrowWriter;
 use tokio::sync::mpsc;
-use std::fs::File;
+use std::fs::{self, File};
 use std::sync::Arc;
 
 use super::Column;
@@ -132,6 +132,7 @@ impl DataReader for MysqlReader {
 
 pub struct ParquetWriter {
     file_path: String,
+    temp_path: String,
     writer: Option<ArrowWriter<File>>,
     schema: Option<Arc<Schema>>,
 }
@@ -139,6 +140,7 @@ pub struct ParquetWriter {
 impl ParquetWriter {
     pub fn new(file_path: String) -> ParquetWriter {
         ParquetWriter {
+                        temp_path: format!("{}.temp", file_path),
             file_path: file_path,
             writer: None,
             schema: None,
@@ -148,7 +150,8 @@ impl ParquetWriter {
 
 impl DataWriter for ParquetWriter {
     fn setup(&mut self, schema: Arc<Schema>) -> Result<()> {
-        let file = File::create(&self.file_path).unwrap();
+        let file = File::create(&self.temp_path).unwrap();
+
         self.writer = Some(ArrowWriter::try_new(file, schema.clone(), None).unwrap());
         self.schema = Some(schema);
         Ok(())
@@ -169,6 +172,7 @@ impl DataWriter for ParquetWriter {
         } else {
             bail!("Invalid Parquet writer.");
         }
+        fs::rename(&self.temp_path, &self.file_path)?;
         Ok(())
     }
 }
