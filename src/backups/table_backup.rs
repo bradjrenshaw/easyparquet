@@ -1,5 +1,5 @@
-use crate::backup::queries::DataReader;
-use crate::backup::queries::DataWriterFactory;
+use crate::readers::DataReader;
+use crate::writers::DataWriterFactory;
 
 //This is a prototype and will be significantly optimized
 // Todo: Needs to read data in chunks and better abstract out various functions for testing and better structure
