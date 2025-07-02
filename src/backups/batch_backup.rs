@@ -1,6 +1,6 @@
+use crate::backups::TableBackup;
 use crate::readers::MysqlReader;
 use crate::writers::ParquetWriterFactory;
-use crate::backups::TableBackup;
 use anyhow::{Result, bail};
 use std::collections::HashSet;
 

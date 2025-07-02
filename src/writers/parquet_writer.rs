@@ -1,10 +1,10 @@
-use std::io::ErrorKind;
-use std::{fs::File, sync::Arc};
-use std::fs;
+use crate::writers::{DataWriter, DataWriterFactory};
+use anyhow::{Result, bail};
 use arrow::{array::RecordBatch, datatypes::Schema};
 use parquet::arrow::ArrowWriter;
-use crate::writers::{DataWriter, DataWriterFactory};
-use anyhow::{bail, Result};
+use std::fs;
+use std::io::ErrorKind;
+use std::{fs::File, sync::Arc};
 
 pub struct ParquetWriter {
     file_path: String,
@@ -16,7 +16,7 @@ pub struct ParquetWriter {
 impl ParquetWriter {
     pub fn new(file_path: String) -> ParquetWriter {
         ParquetWriter {
-                        temp_path: format!("{}.temp", file_path),
+            temp_path: format!("{}.temp", file_path),
             file_path: file_path,
             writer: None,
             schema: None,

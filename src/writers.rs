@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use anyhow::Result;
 use arrow::{array::RecordBatch, datatypes::Schema};
+use std::sync::Arc;
 
 pub trait DataWriter {
     fn setup(&mut self, schema: Arc<Schema>) -> Result<()>;

@@ -1,14 +1,14 @@
-use std::error::Error;
 use anyhow::Result;
+use std::error::Error;
 mod config;
 pub use config::Config;
 
 use crate::backups::BatchBackup;
 
+pub mod backups;
 mod data;
 pub mod readers;
 pub mod writers;
-pub mod backups;
 
 pub async fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let url = config.get_uri();

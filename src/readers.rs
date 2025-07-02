@@ -1,6 +1,6 @@
-    use async_trait::async_trait;
+use crate::writers::DataWriterFactory;
 use anyhow::Result;
-    use crate::writers::DataWriterFactory;
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait DataReader: Send + Sync {
