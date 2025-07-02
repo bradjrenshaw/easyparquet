@@ -31,13 +31,15 @@ pub trait DataWriterFactory: Send + Sync {
 pub struct MysqlReader {
     pool: mysql_async::Pool,
     table_name: String,
+    chunk_size: usize,
 }
 
 impl MysqlReader {
-    pub fn new(pool: Pool, table_name: String) -> MysqlReader {
+    pub fn new(pool: Pool, table_name: String, chunk_size: usize) -> MysqlReader {
         MysqlReader {
             pool: pool,
             table_name: table_name,
+            chunk_size: chunk_size,
         }
     }
 }
@@ -76,26 +78,14 @@ impl DataReader for MysqlReader {
             column_data.push(data);
         }
 
-        let mut columns = MysqlReader::get_columns(&column_data);
-
         let schema = Arc::new(Schema::new(schema_vec));
-
-        while let Some(row_result) = stream.next().await {
-            let row: Row = row_result?;
-            for (i, v) in row.unwrap().into_iter().enumerate() {
-                Column::push(&mut columns[i], v)?;
-            }
-        }
-
-        let batch_vec: Vec<Arc<dyn Array>> = columns.into_iter().map(|col| col.finish()).collect();
-
-        let batch = arrow::array::RecordBatch::try_new(schema.clone(), batch_vec)?;
 
         let (tx, mut rx) = mpsc::channel(100);
 
+        let writer_schema = schema.clone();
         let join_handle = tokio::task::spawn_blocking(move || {
             let mut writer = writer_factory.create();
-            writer.setup(schema.clone())?;
+            writer.setup(writer_schema)?;
             while let Some(message) = rx.blocking_recv() {
                 match message {
             WriteMessage::Chunk(batch) => writer.write(&batch)?,
@@ -106,9 +96,35 @@ impl DataReader for MysqlReader {
             writer.finish()
         });
 
+        loop{
+                    let mut columns = MysqlReader::get_columns(&column_data);
+
+                    let mut rows: usize = 0;
+        while let Some(row_result) = stream.next().await {
+            let row: Row = row_result?;
+            for (i, v) in row.unwrap().into_iter().enumerate() {
+                Column::push(&mut columns[i], v)?;
+            }
+
+            rows = rows + 1;
+            //If chunk size is > 0, and we have reached allocated chunk size (in rows) then break and the outer loop will send the chunk and then reiterate to find more chunks
+            if self.chunk_size > 0 && rows >= self.chunk_size {
+                break;
+            }
+        }
+
+        if rows > 0 {
+            //We have gathered either all data or a chunk
+        let batch_vec: Vec<Arc<dyn Array>> = columns.into_iter().map(|col| col.finish()).collect();
+        let batch = arrow::array::RecordBatch::try_new(schema.clone(), batch_vec)?;
         tx.send(WriteMessage::Chunk(batch)).await?;
+        } else {
+            //end of data stream reached
+            break;
+        }
+    }
+
         tx.send(WriteMessage::Finish).await?;
-        drop(tx);
         join_handle.await??;
         Ok(())
     }
