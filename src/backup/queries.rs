@@ -1,5 +1,5 @@
 use crate::backup::columns::ColumnData;
-use anyhow::{Result, bail};
+use anyhow::{bail, Error, Result};
 use arrow::array::Array;
 use arrow::{array::RecordBatch, datatypes::Schema};
 use async_trait::async_trait;
@@ -9,6 +9,7 @@ use mysql_async::{Pool, Row};
 use parquet::arrow::ArrowWriter;
 use tokio::sync::mpsc;
 use std::fs::{self, File};
+use std::io::ErrorKind;
 use std::sync::Arc;
 
 use super::Column;
@@ -22,6 +23,7 @@ pub trait DataWriter {
     fn setup(&mut self, schema: Arc<Schema>) -> Result<()>;
     fn write(&mut self, batch: &RecordBatch) -> Result<()>;
     fn finish(&mut self) -> Result<()>;
+    fn abort(&mut self) -> Result<()>;
 }
 
 pub trait DataWriterFactory: Send + Sync {
@@ -89,11 +91,18 @@ impl DataReader for MysqlReader {
             while let Some(message) = rx.blocking_recv() {
                 match message {
             WriteMessage::Chunk(batch) => writer.write(&batch)?,
-            WriteMessage::Finish => break,
-            WriteMessage::Error => bail!("Error in another task")
+            WriteMessage::Finish => {
+                writer.finish()?;
+                return Ok(());
+            },
+            WriteMessage::Error => {
+                writer.abort()?;
+                return Ok(());
+            }
                 }
             }
-            writer.finish()
+            //If this point is reached, sender channel closed too early, no Finish message was received, thus the end of the data stream was not reached and the database table cannot be properly backed up
+            bail!("End of data stream too early; improper backup");
         });
 
         loop{
@@ -101,9 +110,19 @@ impl DataReader for MysqlReader {
 
                     let mut rows: usize = 0;
         while let Some(row_result) = stream.next().await {
-            let row: Row = row_result?;
+            let row: Row = match row_result {
+                Ok(row) => row,
+                Err(e) => {
+                    tx.send(WriteMessage::Error).await?;
+                    bail!(e);
+                }
+            };
+
             for (i, v) in row.unwrap().into_iter().enumerate() {
-                Column::push(&mut columns[i], v)?;
+                if let Err(e) = Column::push(&mut columns[i], v) {
+                    tx.send(WriteMessage::Error).await?;
+                    bail!(e);
+                }
             }
 
             rows = rows + 1;
@@ -173,6 +192,20 @@ impl DataWriter for ParquetWriter {
             bail!("Invalid Parquet writer.");
         }
         fs::rename(&self.temp_path, &self.file_path)?;
+        Ok(())
+    }
+
+    fn abort(&mut self) -> Result<()> {
+        if let Err(e) = fs::remove_file(&self.temp_path) {
+            if e.kind() != ErrorKind::NotFound {
+                bail!(e);
+            }
+        }
+        if let Err(e) = fs::remove_file(&self.file_path) {
+            if e.kind() != ErrorKind::NotFound {
+                bail!(e);
+            }
+        }
         Ok(())
     }
 }
