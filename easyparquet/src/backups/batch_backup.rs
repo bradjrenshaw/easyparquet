@@ -29,7 +29,7 @@ impl BatchBackup {
             let pool = pool.clone();
 
             task_set.spawn(async move {
-                let backup = TableBackup::new();
+                let mut backup = TableBackup::new(output_file_path.clone());
                 let reader = Box::new(MysqlReader::new(pool, table_name.clone(), 1000));
                 let writer = Box::new(ParquetWriterFactory::new(output_file_path.clone()));
                 backup.execute(reader, writer).await
