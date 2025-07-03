@@ -7,7 +7,7 @@ use crate::writers::DataWriterFactory;
 //This is a prototype and will be significantly optimized
 // Todo: Needs to read data in chunks and better abstract out various functions for testing and better structure
 // Todo: Better handling of error states (graceful recovery) and fewer unchecked .unwrap() calls
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 ///Reads a table from the specified database and writes it to a parquet file.
 pub struct TableBackup {
@@ -16,11 +16,10 @@ pub struct TableBackup {
 }
 
 impl TableBackup {
-
     pub fn new(file_path: String) -> TableBackup {
         TableBackup {
             temp_path: format!("{}.temp", file_path),
-            file_path
+            file_path,
         }
     }
 

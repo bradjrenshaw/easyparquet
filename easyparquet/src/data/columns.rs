@@ -12,6 +12,7 @@ pub trait ColumnBuilder {
     fn push_value(&mut self, value: Value);
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct ColumnData {
     name: String,
     nullable: bool,
@@ -199,6 +200,83 @@ impl Column {
             Column::Float(holder) => {
                 holder.push(value);
                 Ok(())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod column_data {
+        use super::*;
+
+        use test_case::test_case;
+
+        macro_rules! type_tests {
+            ($ ($test_function:item)+ ) => {
+                $(
+        #[test_case(mysql_column_type::MYSQL_TYPE_VAR_STRING, DataType::Utf8; "String type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_LONG, DataType::Int64; "Long column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_FLOAT, DataType::Float32; "Float column type")]
+        $test_function
+                )+
+            }
+        }
+
+        type_tests! {
+            fn get_arrow_type_known(column_type: mysql_column_type, expected: DataType) {
+                assert_eq!(ColumnData::get_arrow_type(column_type).unwrap(), expected);
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn get_arrow_type_unknown() {
+            ColumnData::get_arrow_type(mysql_column_type::MYSQL_TYPE_BIT).unwrap();
+        }
+
+        type_tests! {
+            fn new_known_types(column_type: mysql_column_type, expected_arrow_type: DataType) {
+                let test_data = ColumnData {
+                    name: String::from("testing"),
+                    nullable: true,
+                    column_type: column_type,
+                    arrow_type: expected_arrow_type,
+                };
+                let data = ColumnData::new(
+                    String::from("testing"),
+                    true,
+                    column_type,
+                )
+                .unwrap();
+                assert_eq!(data, test_data);
+            }
+        }
+
+        #[test]
+        #[should_panic]
+        fn new_unknown_types() {
+            ColumnData::new(
+                String::from("testing"),
+                true,
+                mysql_column_type::MYSQL_TYPE_BIT,
+            )
+            .unwrap();
+        }
+
+        type_tests! {
+            fn get_schema_field(column_type: mysql_column_type, expected_arrow_type: DataType) {
+                let test_field = Field::new(String::from("testing"), expected_arrow_type, true);
+                let data = ColumnData::new(
+                    String::from("testing"),
+                    true,
+                column_type
+                )
+                .unwrap();
+                let field = data.get_schema_field();
+                assert_eq!(field, test_field);
             }
         }
     }
