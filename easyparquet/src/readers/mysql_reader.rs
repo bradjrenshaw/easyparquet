@@ -53,12 +53,12 @@ impl DataReader for MysqlReader {
         let mut schema_vec = Vec::new();
         for column in stream.columns().iter() {
             let name = column.name_str().into_owned();
+            let flags = column.flags();
             //Note that the not_null flag means null is not allowed (mysql NOT NULL) so it needs to be inverted for Arrow nullable
-            let nullable = !column
-                .flags()
-                .contains(mysql_async::consts::ColumnFlags::NOT_NULL_FLAG);
+            let nullable = !flags.contains(mysql_async::consts::ColumnFlags::NOT_NULL_FLAG);
+            let unsigned = flags.contains(mysql_async::consts::ColumnFlags::UNSIGNED_FLAG);
             let column_type = column.column_type();
-            let data = Arc::new(ColumnData::new(name, nullable, column_type)?);
+            let data = Arc::new(ColumnData::new(name, unsigned, nullable, column_type)?);
             schema_vec.push(data.get_schema_field());
             column_data.push(data);
         }

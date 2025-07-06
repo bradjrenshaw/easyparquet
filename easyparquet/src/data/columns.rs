@@ -3,6 +3,8 @@ use arrow::array::Array;
 use arrow::datatypes::{DataType, Field};
 use mysql_async::Value;
 use mysql_async::consts::ColumnType as mysql_column_type;
+use rust_decimal::Decimal;
+use std::str::FromStr;
 use std::sync::Arc;
 
 //Enums are used here instead of dyn/fat pointers for performance
@@ -15,25 +17,34 @@ pub trait ColumnBuilder {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ColumnData {
     name: String,
+    unsigned: bool,
     nullable: bool,
     column_type: mysql_column_type,
     arrow_type: DataType,
 }
 
 impl ColumnData {
-    pub fn get_arrow_type(column_type: mysql_column_type) -> Result<DataType> {
+    pub fn get_arrow_type(column_type: mysql_column_type, unsigned: bool) -> Result<DataType> {
         match column_type {
             mysql_column_type::MYSQL_TYPE_VAR_STRING => Ok(DataType::Utf8),
-            mysql_column_type::MYSQL_TYPE_LONG => Ok(DataType::Int64),
+            mysql_column_type::MYSQL_TYPE_LONG | mysql_column_type::MYSQL_TYPE_LONGLONG => {
+                if unsigned {
+                    Ok(DataType::UInt64)
+                } else {
+                Ok(DataType::Int64)
+                }
+            },
             mysql_column_type::MYSQL_TYPE_FLOAT => Ok(DataType::Float32),
-            _ => bail!("No matching Arrow schema type for column."),
+            mysql_column_type::MYSQL_TYPE_NEWDECIMAL => Ok(DataType::Decimal128(19, 2)),
+            _ => bail!("No matching Arrow schema type for column {:?}.", column_type),
         }
     }
 
-    pub fn new(name: String, nullable: bool, column_type: mysql_column_type) -> Result<ColumnData> {
-        let arrow_type = ColumnData::get_arrow_type(column_type)?;
+    pub fn new(name: String, unsigned: bool, nullable: bool, column_type: mysql_column_type) -> Result<ColumnData> {
+        let arrow_type = ColumnData::get_arrow_type(column_type, unsigned)?;
         Ok(ColumnData {
             name,
+            unsigned,
             nullable,
             column_type,
             arrow_type,
@@ -126,6 +137,34 @@ impl ColumnBuilder for Int64ColumnBuilder {
     }
 }
 
+pub struct Uint64ColumnBuilder {
+    builder: arrow::array::UInt64Builder,
+}
+
+impl Uint64ColumnBuilder {
+    fn new() -> Uint64ColumnBuilder {
+        Uint64ColumnBuilder {
+            builder: arrow::array::UInt64Builder::new(),
+        }
+    }
+}
+
+impl ColumnBuilder for Uint64ColumnBuilder {
+    fn finish(mut self) -> Arc<dyn Array> {
+        Arc::new(self.builder.finish())
+    }
+
+    fn push_null(&mut self) {
+        self.builder.append_null();
+    }
+
+    fn push_value(&mut self, value: mysql_async::Value) {
+        if let mysql_async::Value::UInt(value) = value {
+            self.builder.append_value(value);
+        }
+    }
+}
+
 pub struct FloatColumnBuilder {
     builder: arrow::array::Float32Builder,
 }
@@ -154,10 +193,50 @@ impl ColumnBuilder for FloatColumnBuilder {
     }
 }
 
+pub struct DecimalColumnBuilder {
+    builder: arrow::array::Decimal128Builder,
+    precision: u8,
+    scale: i8
+}
+
+impl DecimalColumnBuilder {
+
+    fn new(precision: u8, scale: i8) -> DecimalColumnBuilder {
+        DecimalColumnBuilder {
+            builder: arrow::array::Decimal128Builder::new().with_precision_and_scale(precision, scale).unwrap(),
+            precision,
+            scale
+        }
+    }
+}
+
+impl ColumnBuilder for DecimalColumnBuilder {
+
+    fn finish(mut self) -> Arc<dyn Array> {
+        Arc::new(self.builder.finish())
+    }
+
+    fn push_null(&mut self) {
+        self.builder.append_null();
+    }
+
+    fn push_value(&mut self, value: mysql_async::Value) {
+        if let mysql_async::Value::Bytes(value) = value {
+            let s = str::from_utf8(&value).unwrap();
+            let mut dec = Decimal::from_str(&s).unwrap();
+            dec.rescale(self.scale as u32);
+            let value = dec.mantissa();
+            self.builder.append_value(value);
+        }
+    }
+}
+
 pub enum Column {
     String(ColumnHolder<StringColumnBuilder>),
     Int64(ColumnHolder<Int64ColumnBuilder>),
+    Uint64(ColumnHolder<Uint64ColumnBuilder>),
     Float(ColumnHolder<FloatColumnBuilder>),
+    Decimal(ColumnHolder<DecimalColumnBuilder>)
 }
 
 impl Column {
@@ -165,15 +244,22 @@ impl Column {
         match self {
             Column::String(data) => data.finish(),
             Column::Int64(data) => data.finish(),
+            Column::Uint64(data) => data.finish(),
             Column::Float(data) => data.finish(),
+            Column::Decimal(data) => data.finish(),
         }
     }
 
     pub fn from_data(data: Arc<ColumnData>) -> Result<Column> {
         match data.column_type {
-            mysql_column_type::MYSQL_TYPE_LONG => {
+            mysql_column_type::MYSQL_TYPE_LONG | mysql_column_type::MYSQL_TYPE_LONGLONG => {
+                if data.unsigned {
+                let column = Column::Uint64(ColumnHolder::new(data, Uint64ColumnBuilder::new()));
+                    Ok(column)
+                } else {
                 let column = Column::Int64(ColumnHolder::new(data, Int64ColumnBuilder::new()));
                 Ok(column)
+                }
             }
             mysql_column_type::MYSQL_TYPE_VAR_STRING => {
                 let column = Column::String(ColumnHolder::new(data, StringColumnBuilder::new()));
@@ -181,6 +267,10 @@ impl Column {
             }
             mysql_column_type::MYSQL_TYPE_FLOAT => {
                 let column = Column::Float(ColumnHolder::new(data, FloatColumnBuilder::new()));
+                Ok(column)
+            },
+            mysql_column_type::MYSQL_TYPE_NEWDECIMAL => {
+                let column = Column::Decimal(ColumnHolder::new(data, DecimalColumnBuilder::new(19, 2)));
                 Ok(column)
             }
             _ => bail!("Unsupported column type".to_string()),
@@ -196,8 +286,16 @@ impl Column {
             Column::Int64(holder) => {
                 holder.push(value);
                 Ok(())
+            },
+            Column::Uint64(holder) => {
+                holder.push(value);
+                Ok(())
             }
             Column::Float(holder) => {
+                holder.push(value);
+                Ok(())
+            },
+            Column::Decimal(holder) => {
                 holder.push(value);
                 Ok(())
             }
@@ -217,36 +315,44 @@ mod tests {
         macro_rules! type_tests {
             ($ ($test_function:item)+ ) => {
                 $(
-        #[test_case(mysql_column_type::MYSQL_TYPE_VAR_STRING, DataType::Utf8; "String type")]
-        #[test_case(mysql_column_type::MYSQL_TYPE_LONG, DataType::Int64; "Long column type")]
-        #[test_case(mysql_column_type::MYSQL_TYPE_FLOAT, DataType::Float32; "Float column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_VAR_STRING, false, DataType::Utf8; "String type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_LONG, true, DataType::UInt64; "Unsigned Long column type")]
+                #[test_case(mysql_column_type::MYSQL_TYPE_LONG, false, DataType::Int64; "Signed Long column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_LONGLONG, true, DataType::UInt64; "Unsigned long long column type")]
+                #[test_case(mysql_column_type::MYSQL_TYPE_LONGLONG, false, DataType::Int64; "Signed long long column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_FLOAT, false, DataType::Float32; "Float column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_NEWDECIMAL, false, DataType::Decimal128(19, 2); "Signed decimal column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_NEWDECIMAL, true, DataType::Decimal128(19, 2); "Unsigned decimal column type")]
+        
         $test_function
                 )+
             }
         }
 
         type_tests! {
-            fn get_arrow_type_known(column_type: mysql_column_type, expected: DataType) {
-                assert_eq!(ColumnData::get_arrow_type(column_type).unwrap(), expected);
+            fn get_arrow_type_known(column_type: mysql_column_type, unsigned: bool, expected: DataType) {
+                assert_eq!(ColumnData::get_arrow_type(column_type, unsigned).unwrap(), expected);
             }
         }
 
         #[test]
         #[should_panic]
         fn get_arrow_type_unknown() {
-            ColumnData::get_arrow_type(mysql_column_type::MYSQL_TYPE_BIT).unwrap();
+            ColumnData::get_arrow_type(mysql_column_type::MYSQL_TYPE_BIT, false).unwrap();
         }
 
         type_tests! {
-            fn new_known_types(column_type: mysql_column_type, expected_arrow_type: DataType) {
+            fn new_known_types(column_type: mysql_column_type, unsigned: bool, expected_arrow_type: DataType) {
                 let test_data = ColumnData {
                     name: String::from("testing"),
+                    unsigned: unsigned,
                     nullable: true,
                     column_type: column_type,
                     arrow_type: expected_arrow_type,
                 };
                 let data = ColumnData::new(
                     String::from("testing"),
+                    unsigned,
                     true,
                     column_type,
                 )
@@ -260,6 +366,7 @@ mod tests {
         fn new_unknown_types() {
             ColumnData::new(
                 String::from("testing"),
+                false,
                 true,
                 mysql_column_type::MYSQL_TYPE_BIT,
             )
@@ -267,10 +374,11 @@ mod tests {
         }
 
         type_tests! {
-            fn get_schema_field(column_type: mysql_column_type, expected_arrow_type: DataType) {
+            fn get_schema_field(column_type: mysql_column_type, unsigned: bool, expected_arrow_type: DataType) {
                 let test_field = Field::new(String::from("testing"), expected_arrow_type, true);
                 let data = ColumnData::new(
                     String::from("testing"),
+                    unsigned,
                     true,
                 column_type
                 )
