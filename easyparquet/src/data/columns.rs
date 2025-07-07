@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use arrow::array::Array;
 use arrow::datatypes::{DataType, Field};
+use chrono::NaiveDate;
 use mysql_async::Value;
 use mysql_async::consts::ColumnType as mysql_column_type;
 use rust_decimal::Decimal;
@@ -36,6 +37,7 @@ impl ColumnData {
             },
             mysql_column_type::MYSQL_TYPE_FLOAT => Ok(DataType::Float32),
             mysql_column_type::MYSQL_TYPE_NEWDECIMAL => Ok(DataType::Decimal128(19, 2)),
+            mysql_column_type::MYSQL_TYPE_DATETIME => Ok(DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None)),
             _ => bail!("No matching Arrow schema type for column {:?}.", column_type),
         }
     }
@@ -74,6 +76,7 @@ impl<T: ColumnBuilder> ColumnHolder<T> {
         if self.data.nullable {
             if let mysql_async::Value::NULL = value {
                 self.builder.push_null();
+                return;
             }
         }
         self.builder.push_value(value);
@@ -231,12 +234,45 @@ impl ColumnBuilder for DecimalColumnBuilder {
     }
 }
 
+pub struct DateTimeColumnBuilder {
+    builder: arrow::array::TimestampMicrosecondBuilder,
+}
+
+impl DateTimeColumnBuilder {
+
+    pub fn new() -> DateTimeColumnBuilder {
+        DateTimeColumnBuilder {
+            builder: arrow::array::TimestampMicrosecondBuilder::new()
+        }
+    }
+}
+
+impl ColumnBuilder for DateTimeColumnBuilder {
+
+    fn finish(mut self) -> Arc<dyn Array> {
+        Arc::new(self.builder.finish())
+    }
+
+    fn push_null(&mut self) {
+        self.builder.append_null();
+    }
+
+    fn push_value(&mut self, value: mysql_async::Value) {
+        if let mysql_async::Value::Date(year, month, day, hours, minutes, seconds, micro_seconds) = value {
+            let dt = NaiveDate::from_ymd(year as i32, month as u32, day as u32).and_hms_micro(hours as u32, minutes as u32, seconds as u32, micro_seconds);
+            let value = dt.timestamp_micros();
+            self.builder.append_value(value);
+        }
+    }
+}
+
 pub enum Column {
     String(ColumnHolder<StringColumnBuilder>),
     Int64(ColumnHolder<Int64ColumnBuilder>),
     Uint64(ColumnHolder<Uint64ColumnBuilder>),
     Float(ColumnHolder<FloatColumnBuilder>),
-    Decimal(ColumnHolder<DecimalColumnBuilder>)
+    Decimal(ColumnHolder<DecimalColumnBuilder>),
+    DateTime(ColumnHolder<DateTimeColumnBuilder>),
 }
 
 impl Column {
@@ -247,6 +283,7 @@ impl Column {
             Column::Uint64(data) => data.finish(),
             Column::Float(data) => data.finish(),
             Column::Decimal(data) => data.finish(),
+            Column::DateTime(data) => data.finish(),
         }
     }
 
@@ -272,6 +309,11 @@ impl Column {
             mysql_column_type::MYSQL_TYPE_NEWDECIMAL => {
                 let column = Column::Decimal(ColumnHolder::new(data, DecimalColumnBuilder::new(19, 2)));
                 Ok(column)
+            },
+            mysql_column_type::MYSQL_TYPE_DATETIME => {
+                let column = Column::DateTime(ColumnHolder::new(data, DateTimeColumnBuilder::new()));
+                Ok(column)
+
             }
             _ => bail!("Unsupported column type".to_string()),
         }
@@ -296,6 +338,10 @@ impl Column {
                 Ok(())
             },
             Column::Decimal(holder) => {
+                holder.push(value);
+                Ok(())
+            },
+            Column::DateTime(holder) => {
                 holder.push(value);
                 Ok(())
             }

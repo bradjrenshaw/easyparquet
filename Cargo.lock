@@ -804,6 +804,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
+ "chrono",
  "dotenvy",
  "futures",
  "mysql_async",
