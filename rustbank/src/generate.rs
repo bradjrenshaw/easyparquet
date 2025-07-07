@@ -10,8 +10,9 @@ T: Data + Serialize
     let mut path = path.clone();
     path.push(name);
     let mut writer = csv::Writer::from_path(path)?;
-    for _ in 0..rows {
-        let record = T::generate();
+    for r in 0..rows {
+        //we don't want to reference a foreign key with a higher id than we have rows or the relationship will potentially fail
+        let record = T::generate(rows);
         writer.serialize(record)?;
     }
     writer.flush()?;

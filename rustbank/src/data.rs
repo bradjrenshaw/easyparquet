@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use chrono::TimeZone;
 
 pub trait Data {
-    fn generate() -> Self;
+    fn generate(rows: usize) -> Self;
     fn table_name() -> &'static str;
     fn create_query() -> String;
     fn insert_query() -> String;
@@ -33,7 +33,7 @@ pub struct User {
 
 impl Data for User {
 
-    fn generate() -> Self {
+    fn generate(rows: usize) -> Self {
         //Fake implemented manually here as I had significant issues with the dummy implementation
             let start_date: DateTime<Utc> = Utc.with_ymd_and_hms(1000, 1, 1, 0, 0, 0).unwrap();
             let end_date: DateTime<Utc> = Utc.with_ymd_and_hms(9999, 1, 1, 0, 0, 0).unwrap();
@@ -112,14 +112,14 @@ pub struct Account {
 
 impl Data for Account {
 
-    fn generate() -> Self {
+    fn generate(rows: usize) -> Self {
         let random_int: i128 = (50..=1000000).fake();
         let balance_decimal = Decimal::from_i128_with_scale(random_int, 2);
                     let start_date: DateTime<Utc> = Utc.with_ymd_and_hms(1000, 1, 1, 0, 0, 0).unwrap();
             let end_date: DateTime<Utc> = Utc.with_ymd_and_hms(9999, 1, 1, 0, 0, 0).unwrap();
             let date_faker = DateTimeBetween(start_date, end_date);
         Self {
-            user_id: (1..=100).fake(),
+            user_id: (1..=rows as u64).fake(),
             account_number: CreditCardNumber().fake(),
             currency_code: CurrencyCode().fake(),
             balance: balance_decimal,
