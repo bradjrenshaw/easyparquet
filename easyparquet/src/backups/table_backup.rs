@@ -1,24 +1,23 @@
-use std::fs;
+use std::{fs, path::PathBuf};
 use std::io::ErrorKind;
 
 use crate::readers::DataReader;
 use crate::writers::DataWriterFactory;
 
-//This is a prototype and will be significantly optimized
-// Todo: Needs to read data in chunks and better abstract out various functions for testing and better structure
-// Todo: Better handling of error states (graceful recovery) and fewer unchecked .unwrap() calls
 use anyhow::{Result, bail};
 
 ///Reads a table from the specified database and writes it to a parquet file.
 pub struct TableBackup {
-    file_path: String,
-    temp_path: String,
+    file_path: PathBuf,
+    temp_path: PathBuf,
 }
 
 impl TableBackup {
-    pub fn new(file_path: String) -> TableBackup {
+    pub fn new(file_path: PathBuf) -> TableBackup {
+        let mut temp_path = file_path.clone();
+        temp_path.set_extension("temp");
         TableBackup {
-            temp_path: format!("{}.temp", file_path),
+            temp_path,
             file_path,
         }
     }

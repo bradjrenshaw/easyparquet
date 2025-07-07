@@ -2,17 +2,19 @@ use crate::backups::TableBackup;
 use crate::readers::MysqlReader;
 use crate::writers::ParquetWriterFactory;
 use anyhow::{Result, bail};
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf};
 
 ///Simultaneously backs up multiple databases to their associated. parquet files.
 pub struct BatchBackup {
+    root_directory: PathBuf,
     tables: HashSet<String>,
 }
 
 impl BatchBackup {
-    pub fn new() -> BatchBackup {
+    pub fn new(root_directory: PathBuf) -> BatchBackup {
         BatchBackup {
             tables: HashSet::new(),
+            root_directory
         }
     }
 
@@ -25,13 +27,14 @@ impl BatchBackup {
 
         for name in self.tables.iter() {
             let table_name = name.clone();
-            let output_file_path = format!("{}.parquet", table_name);
+            let mut path = self.root_directory.clone();
+            let output_file_name = format!("{}.parquet", table_name);
+            path.push(output_file_name);
             let pool = pool.clone();
-
             task_set.spawn(async move {
-                let mut backup = TableBackup::new(output_file_path.clone());
+                let mut backup = TableBackup::new(path.clone());
                 let reader = Box::new(MysqlReader::new(pool, table_name.clone(), 1000));
-                let writer = Box::new(ParquetWriterFactory::new(output_file_path.clone()));
+                let writer = Box::new(ParquetWriterFactory::new(path.clone()));
                 backup.execute(reader, writer).await
             });
         }

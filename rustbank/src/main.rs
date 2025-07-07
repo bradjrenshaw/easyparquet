@@ -2,7 +2,6 @@ use std::{path::PathBuf, process};
 use anyhow::Result;
 use dotenvy;
 use clap::{Parser, Subcommand, Args};
-//use rustbank::Backup;
 use rustbank::{backup, generate, upload, Config};
 
 #[derive(Parser, Debug)]

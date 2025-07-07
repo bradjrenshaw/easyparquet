@@ -128,7 +128,12 @@ impl DataReader for MysqlReader {
         }
 
         tx.send(WriteMessage::Finish).await?;
-        write_task.await??;
+
+        match write_task.await {
+            Ok(Ok(())) => {},
+            Ok(Err(e)) => bail!(e),
+            Err(e) => bail!("Writer task failed: {e}."),
+        };
         Ok(())
     }
 }

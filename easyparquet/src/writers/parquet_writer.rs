@@ -4,20 +4,23 @@ use arrow::{array::RecordBatch, datatypes::Schema};
 use parquet::arrow::ArrowWriter;
 use std::fs;
 use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::{fs::File, sync::Arc};
 
 pub struct ParquetWriter {
-    file_path: String,
-    temp_path: String,
+    file_path: PathBuf,
+    temp_path: PathBuf,
     writer: Option<ArrowWriter<File>>,
     schema: Option<Arc<Schema>>,
 }
 
 impl ParquetWriter {
-    pub fn new(file_path: String) -> ParquetWriter {
+    pub fn new(file_path: PathBuf) -> ParquetWriter {
+        let mut temp_path = file_path.clone();
+        temp_path.set_extension("temp");
         ParquetWriter {
-            temp_path: format!("{}.temp", file_path),
             file_path: file_path,
+            temp_path: temp_path,
             writer: None,
             schema: None,
         }
@@ -26,9 +29,8 @@ impl ParquetWriter {
 
 impl DataWriter for ParquetWriter {
     fn setup(&mut self, schema: Arc<Schema>) -> Result<()> {
-        let file = File::create(&self.temp_path).unwrap();
-
-        self.writer = Some(ArrowWriter::try_new(file, schema.clone(), None).unwrap());
+        let file = File::create(&self.temp_path)?;
+        self.writer = Some(ArrowWriter::try_new(file, schema.clone(), None)?);
         self.schema = Some(schema);
         Ok(())
     }
@@ -68,11 +70,11 @@ impl DataWriter for ParquetWriter {
 }
 
 pub struct ParquetWriterFactory {
-    file_path: String,
+    file_path: PathBuf,
 }
 
 impl ParquetWriterFactory {
-    pub fn new(file_path: String) -> Self {
+    pub fn new(file_path: PathBuf) -> Self {
         Self { file_path }
     }
 }
