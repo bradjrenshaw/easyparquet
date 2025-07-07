@@ -7,7 +7,7 @@ use tokio;
 async fn main() {
     //Detect parsing errors in the .env file only.
     if let Err(e @ dotenvy::Error::LineParse(..)) = dotenvy::dotenv() {
-        println!("Error parsing .env file\n{e}");
+        eprintln!("Error parsing .env file\n{e}");
         process::exit(1);
     }
 

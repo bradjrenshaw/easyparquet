@@ -11,7 +11,7 @@ T: Data + Serialize
     path.push(name);
     let mut writer = csv::Writer::from_path(path)?;
     for _ in 0..rows {
-        //we don't want to reference a foreign key with a higher id than we have rows or the relationship will potentially fail, so ensure this is called after users is uploaded
+        //We use rows here to prevent any foreign key constraints failing due to an id being referenced that is higher than rows
         let record = T::generate(rows);
         writer.serialize(record)?;
     }

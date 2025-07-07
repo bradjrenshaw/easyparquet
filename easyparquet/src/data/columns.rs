@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 //Enums are used here instead of dyn/fat pointers for performance
+//Columns and schemas are automatically determined by an implementation of each Reader trait and passed to their writers as needed
 pub trait ColumnBuilder {
     fn finish(self) -> Arc<dyn Array>;
     fn push_null(&mut self) -> Result<()>;
