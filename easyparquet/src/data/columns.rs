@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Context, Result};
 use arrow::array::Array;
 use arrow::datatypes::{DataType, Field};
 use chrono::NaiveDate;
@@ -79,7 +79,7 @@ impl<T: ColumnBuilder> ColumnHolder<T> {
                 self.builder.push_null()?;
                 return Ok(());
                 } else {
-                    bail!("Attempted to push null value.");
+                    bail!("Attempted to push null value to column that does not allow null values.");
                 }
             }
         self.builder.push_value(value)?;
@@ -115,7 +115,7 @@ impl ColumnBuilder for StringColumnBuilder {
             self.builder.append_value(result);
             Ok(())
         } else {
-            bail!("Invalid value");
+            bail!("Value for column must be a String, got {:?}.", value);
         }
     }
 }
@@ -147,7 +147,7 @@ impl ColumnBuilder for Int64ColumnBuilder {
             self.builder.append_value(value);
             Ok(())
         } else {
-            bail!("Value must be an integer.");
+            bail!("Value for column must be an integer, got {:?}.", value);
         }
     }
 }
@@ -175,12 +175,12 @@ impl ColumnBuilder for Uint64ColumnBuilder {
     }
 
     fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
-        //note: mysql_async uses Int64 to store unsigned longs, etc. Value needs to be converted here.
+        //note: mysql_async uses Int64 to store unsigned long and longlong when receiving data from a database. Value needs to be converted to u64 here for accurate parquet representation.
         if let mysql_async::Value::Int(value) = value {
             self.builder.append_value(value as u64);
             Ok(())
         } else {
-            bail!("Value must be an uint but it is {:?}.", value);
+            bail!("Value for column must be uint, got {:?}.", value);
         }
     }
 }
@@ -212,24 +212,21 @@ impl ColumnBuilder for FloatColumnBuilder {
             self.builder.append_value(value);
             Ok(())
         } else {
-            bail!("Value must be a float.");
+            bail!("Value for column must be float, got {:?}.", value);
         }
     }
 }
 
+//Todo: In future this should read the exact precision from the mysql table schema
 pub struct DecimalColumnBuilder {
     builder: arrow::array::Decimal128Builder,
-    precision: u8,
-    scale: i8
 }
 
 impl DecimalColumnBuilder {
 
-    fn new(precision: u8, scale: i8) -> DecimalColumnBuilder {
+    fn new() -> DecimalColumnBuilder {
         DecimalColumnBuilder {
-            builder: arrow::array::Decimal128Builder::new().with_precision_and_scale(precision, scale).unwrap(),
-            precision,
-            scale
+            builder: arrow::array::Decimal128Builder::new().with_precision_and_scale(19, 2).unwrap(),
         }
     }
 }
@@ -247,14 +244,15 @@ impl ColumnBuilder for DecimalColumnBuilder {
 
     fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Bytes(value) = value {
-            let s = str::from_utf8(&value).unwrap();
+            //Need to convert from the mysql string representation of decimals to Parquet's mantissa and scale-based representation.
+            let s = str::from_utf8(&value).context("Could not convert decimal to in-memory string representation.")?;
             let mut dec = Decimal::from_str(&s)?;
-            dec.rescale(self.scale as u32);
+            dec.rescale(2 as u32);
             let value = dec.mantissa();
             self.builder.append_value(value);
             Ok(())
         } else {
-            bail!("Value must be a Decimal.");
+            bail!("Value for column must be Decimal, got {:?}.", value);
         }
     }
 }
@@ -285,13 +283,13 @@ impl ColumnBuilder for DateColumnBuilder {
 
     fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Date(year, month, day, _, _, _, _) = value {
-            let epoch = NaiveDate::from_ymd(1970, 1, 1);
-            let dt = NaiveDate::from_ymd(year as i32, month as u32, day as u32);
+            let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).context("Epoch for Date comparison could not be converted")?;
+            let dt = NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32).context("Date for Date comparison could not be created.")?;
             let value = dt.signed_duration_since(epoch).num_days() as i32;
             self.builder.append_value(value);
             Ok(())
         } else {
-            bail!("Value must be a date.");
+            bail!("Value for column must be Date, got {:?}.", value);
         }
     }
 }
@@ -322,12 +320,13 @@ impl ColumnBuilder for DateTimeColumnBuilder {
 
     fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Date(year, month, day, hours, minutes, seconds, micro_seconds) = value {
-            let dt = NaiveDate::from_ymd(year as i32, month as u32, day as u32).and_hms_micro(hours as u32, minutes as u32, seconds as u32, micro_seconds);
-            let value = dt.timestamp_micros();
+            let dt = NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32).context("Could not convert Date portion of DateTime.")?;
+                        let dt = dt.and_hms_micro_opt(hours as u32, minutes as u32, seconds as u32, micro_seconds).context("Could not convert Time portion of DateTime.")?;
+            let value = dt.and_utc().timestamp_micros();
             self.builder.append_value(value);
             Ok(())
         } else {
-            bail!("Value msut be a DateTime.");
+            bail!("Value for column must be DateTime, got {:?}.", value);
         }
     }
 }
@@ -375,7 +374,7 @@ impl Column {
                 Ok(column)
             },
             mysql_column_type::MYSQL_TYPE_NEWDECIMAL => {
-                let column = Column::Decimal(ColumnHolder::new(data, DecimalColumnBuilder::new(19, 2)));
+                let column = Column::Decimal(ColumnHolder::new(data, DecimalColumnBuilder::new()));
                 Ok(column)
             },
             mysql_column_type::MYSQL_TYPE_DATE => {

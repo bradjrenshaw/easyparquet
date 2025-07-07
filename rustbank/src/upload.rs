@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use csv_async::AsyncReaderBuilder;
 use mysql_async::{prelude::Queryable, Pool, Transaction, TxOpts};
 use serde::{Deserialize, Serialize};
-use tokio::fs::{self, File};
+use tokio::fs;
 use crate::{config, data::{Account, Data, User}, Config};
 use futures::StreamExt;
 use tokio_util::compat::TokioAsyncReadCompatExt;                                                                      

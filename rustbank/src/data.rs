@@ -1,7 +1,7 @@
 use fake::faker::chrono::ar_sa::DateTimeBetween;
 use mysql_async::prelude::FromRow;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use fake::{Dummy, Fake, Faker};
+use fake::{Dummy, Fake};
 use fake::faker::name::en::{FirstName, LastName};
 use fake::faker::phone_number::en::PhoneNumber;
 use fake::faker::internet::en::SafeEmail;
