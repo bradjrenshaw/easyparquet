@@ -37,6 +37,7 @@ T: Data + Clone + Sync + Serialize + for<'de> Deserialize<'de> + Into<mysql_asyn
         match record {
             Ok(record) => {
                 batch.push(record);
+                println!("Added record {}.", batch.len());
                 if batch.len() >= BATCH_SIZE {
                     batches = batches + 1;
                     if let Err(e) = upload_batch(&mut transaction, insert_statement.clone(), &mut batch).await {
@@ -52,6 +53,13 @@ T: Data + Clone + Sync + Serialize + for<'de> Deserialize<'de> + Into<mysql_asyn
         }
     }
 
+    if batch.len() > 0 {
+        println!("Uploading final batch.");
+                            if let Err(e) = upload_batch(&mut transaction, insert_statement.clone(), &mut batch).await {
+                                transaction.rollback().await?;
+                                bail!(e);
+                            }
+    }
     transaction.commit().await?;
     Ok(())
 }

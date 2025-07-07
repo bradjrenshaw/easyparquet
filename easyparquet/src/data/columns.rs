@@ -11,8 +11,8 @@ use std::sync::Arc;
 //Enums are used here instead of dyn/fat pointers for performance
 pub trait ColumnBuilder {
     fn finish(self) -> Arc<dyn Array>;
-    fn push_null(&mut self);
-    fn push_value(&mut self, value: Value);
+    fn push_null(&mut self) -> Result<()>;
+    fn push_value(&mut self, value: Value) -> Result<()>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -37,6 +37,7 @@ impl ColumnData {
             },
             mysql_column_type::MYSQL_TYPE_FLOAT => Ok(DataType::Float32),
             mysql_column_type::MYSQL_TYPE_NEWDECIMAL => Ok(DataType::Decimal128(19, 2)),
+            mysql_column_type::MYSQL_TYPE_DATE => Ok(DataType::Date32),
             mysql_column_type::MYSQL_TYPE_DATETIME => Ok(DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None)),
             _ => bail!("No matching Arrow schema type for column {:?}.", column_type),
         }
@@ -72,14 +73,17 @@ impl<T: ColumnBuilder> ColumnHolder<T> {
         self.builder.finish()
     }
 
-    pub fn push(&mut self, value: mysql_async::Value) {
-        if self.data.nullable {
+    pub fn push(&mut self, value: mysql_async::Value) -> Result<()> {
             if let mysql_async::Value::NULL = value {
-                self.builder.push_null();
-                return;
+                if self.data.nullable {
+                self.builder.push_null()?;
+                return Ok(());
+                } else {
+                    bail!("Attempted to push null value.");
+                }
             }
-        }
-        self.builder.push_value(value);
+        self.builder.push_value(value)?;
+        Ok(())
     }
 }
 
@@ -100,14 +104,18 @@ impl ColumnBuilder for StringColumnBuilder {
         Arc::new(self.builder.finish())
     }
 
-    fn push_null(&mut self) {
+    fn push_null(&mut self) -> Result<()> {
         self.builder.append_null();
+        Ok(())
     }
 
-    fn push_value(&mut self, value: mysql_async::Value) {
+    fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Bytes(value) = value {
             let result = String::from_utf8(value).unwrap();
             self.builder.append_value(result);
+            Ok(())
+        } else {
+            bail!("Invalid value");
         }
     }
 }
@@ -129,13 +137,17 @@ impl ColumnBuilder for Int64ColumnBuilder {
         Arc::new(self.builder.finish())
     }
 
-    fn push_null(&mut self) {
+    fn push_null(&mut self) -> Result<()> {
         self.builder.append_null();
+        Ok(())
     }
 
-    fn push_value(&mut self, value: mysql_async::Value) {
+    fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Int(value) = value {
             self.builder.append_value(value);
+            Ok(())
+        } else {
+            bail!("Value must be an integer.");
         }
     }
 }
@@ -157,13 +169,18 @@ impl ColumnBuilder for Uint64ColumnBuilder {
         Arc::new(self.builder.finish())
     }
 
-    fn push_null(&mut self) {
+    fn push_null(&mut self) -> Result<()> {
         self.builder.append_null();
+        Ok(())
     }
 
-    fn push_value(&mut self, value: mysql_async::Value) {
-        if let mysql_async::Value::UInt(value) = value {
-            self.builder.append_value(value);
+    fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
+        //note: mysql_async uses Int64 to store unsigned longs, etc. Value needs to be converted here.
+        if let mysql_async::Value::Int(value) = value {
+            self.builder.append_value(value as u64);
+            Ok(())
+        } else {
+            bail!("Value must be an uint but it is {:?}.", value);
         }
     }
 }
@@ -185,13 +202,17 @@ impl ColumnBuilder for FloatColumnBuilder {
         Arc::new(self.builder.finish())
     }
 
-    fn push_null(&mut self) {
+    fn push_null(&mut self) -> Result<()> {
         self.builder.append_null();
+        Ok(())
     }
 
-    fn push_value(&mut self, value: mysql_async::Value) {
+    fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Float(value) = value {
             self.builder.append_value(value);
+            Ok(())
+        } else {
+            bail!("Value must be a float.");
         }
     }
 }
@@ -219,17 +240,58 @@ impl ColumnBuilder for DecimalColumnBuilder {
         Arc::new(self.builder.finish())
     }
 
-    fn push_null(&mut self) {
+    fn push_null(&mut self) -> Result<()> {
         self.builder.append_null();
+        Ok(())
     }
 
-    fn push_value(&mut self, value: mysql_async::Value) {
+    fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Bytes(value) = value {
             let s = str::from_utf8(&value).unwrap();
-            let mut dec = Decimal::from_str(&s).unwrap();
+            let mut dec = Decimal::from_str(&s)?;
             dec.rescale(self.scale as u32);
             let value = dec.mantissa();
             self.builder.append_value(value);
+            Ok(())
+        } else {
+            bail!("Value must be a Decimal.");
+        }
+    }
+}
+
+pub struct DateColumnBuilder {
+    builder: arrow::array::Date32Builder,
+}
+
+impl DateColumnBuilder {
+
+    pub fn new() -> DateColumnBuilder {
+        DateColumnBuilder {
+            builder: arrow::array::Date32Builder::new()
+        }
+    }
+}
+
+impl ColumnBuilder for DateColumnBuilder {
+
+    fn finish(mut self) -> Arc<dyn Array> {
+        Arc::new(self.builder.finish())
+    }
+
+    fn push_null(&mut self) -> Result<()> {
+        self.builder.append_null();
+        Ok(())
+    }
+
+    fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
+        if let mysql_async::Value::Date(year, month, day, _, _, _, _) = value {
+            let epoch = NaiveDate::from_ymd(1970, 1, 1);
+            let dt = NaiveDate::from_ymd(year as i32, month as u32, day as u32);
+            let value = dt.signed_duration_since(epoch).num_days() as i32;
+            self.builder.append_value(value);
+            Ok(())
+        } else {
+            bail!("Value must be a date.");
         }
     }
 }
@@ -253,15 +315,19 @@ impl ColumnBuilder for DateTimeColumnBuilder {
         Arc::new(self.builder.finish())
     }
 
-    fn push_null(&mut self) {
+    fn push_null(&mut self) -> Result<()> {
         self.builder.append_null();
+        Ok(())
     }
 
-    fn push_value(&mut self, value: mysql_async::Value) {
+    fn push_value(&mut self, value: mysql_async::Value) -> Result<()> {
         if let mysql_async::Value::Date(year, month, day, hours, minutes, seconds, micro_seconds) = value {
             let dt = NaiveDate::from_ymd(year as i32, month as u32, day as u32).and_hms_micro(hours as u32, minutes as u32, seconds as u32, micro_seconds);
             let value = dt.timestamp_micros();
             self.builder.append_value(value);
+            Ok(())
+        } else {
+            bail!("Value msut be a DateTime.");
         }
     }
 }
@@ -272,6 +338,7 @@ pub enum Column {
     Uint64(ColumnHolder<Uint64ColumnBuilder>),
     Float(ColumnHolder<FloatColumnBuilder>),
     Decimal(ColumnHolder<DecimalColumnBuilder>),
+    Date(ColumnHolder<DateColumnBuilder>),
     DateTime(ColumnHolder<DateTimeColumnBuilder>),
 }
 
@@ -283,6 +350,7 @@ impl Column {
             Column::Uint64(data) => data.finish(),
             Column::Float(data) => data.finish(),
             Column::Decimal(data) => data.finish(),
+            Column::Date(data) => data.finish(),
             Column::DateTime(data) => data.finish(),
         }
     }
@@ -310,10 +378,13 @@ impl Column {
                 let column = Column::Decimal(ColumnHolder::new(data, DecimalColumnBuilder::new(19, 2)));
                 Ok(column)
             },
+            mysql_column_type::MYSQL_TYPE_DATE => {
+                let column = Column::Date(ColumnHolder::new(data, DateColumnBuilder::new()));
+                Ok(column)
+            },
             mysql_column_type::MYSQL_TYPE_DATETIME => {
                 let column = Column::DateTime(ColumnHolder::new(data, DateTimeColumnBuilder::new()));
                 Ok(column)
-
             }
             _ => bail!("Unsupported column type".to_string()),
         }
@@ -322,27 +393,31 @@ impl Column {
     pub fn push(column: &mut Column, value: Value) -> Result<()> {
         match column {
             Column::String(holder) => {
-                holder.push(value);
+                holder.push(value)?;
                 Ok(())
             }
             Column::Int64(holder) => {
-                holder.push(value);
+                holder.push(value)?;
                 Ok(())
             },
             Column::Uint64(holder) => {
-                holder.push(value);
+                holder.push(value)?;
                 Ok(())
             }
             Column::Float(holder) => {
-                holder.push(value);
+                holder.push(value)?;
                 Ok(())
             },
             Column::Decimal(holder) => {
-                holder.push(value);
+                holder.push(value)?;
                 Ok(())
             },
+            Column::Date(holder) => {
+                holder.push(value)?;
+                Ok(())
+            }
             Column::DateTime(holder) => {
-                holder.push(value);
+                holder.push(value)?;
                 Ok(())
             }
         }
