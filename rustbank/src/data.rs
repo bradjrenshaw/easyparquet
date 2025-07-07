@@ -6,7 +6,7 @@ use fake::faker::name::en::{FirstName, LastName};
 use fake::faker::phone_number::en::PhoneNumber;
 use fake::faker::internet::en::SafeEmail;
 use fake::faker::address::en::StreetName;
-use fake::faker::chrono::en::{Date, DateTime};
+use fake::faker::chrono::en::{DateTime};
 use fake::faker::creditcard::en::CreditCardNumber;
 use fake::faker::currency::en::CurrencyCode;
 use rust_decimal::Decimal;
@@ -33,7 +33,7 @@ pub struct User {
 
 impl Data for User {
 
-    fn generate(rows: usize) -> Self {
+    fn generate(_rows: usize) -> Self {
         //Fake implemented manually here as I had significant issues with the dummy implementation
             let start_date: DateTime<Utc> = Utc.with_ymd_and_hms(1000, 1, 1, 0, 0, 0).unwrap();
             let end_date: DateTime<Utc> = Utc.with_ymd_and_hms(9999, 1, 1, 0, 0, 0).unwrap();

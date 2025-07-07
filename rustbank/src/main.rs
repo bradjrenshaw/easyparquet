@@ -1,5 +1,5 @@
 use std::{path::PathBuf, process};
-use anyhow::{bail, Result};
+use anyhow::Result;
 use dotenvy;
 use clap::{Parser, Subcommand, Args};
 //use rustbank::Backup;

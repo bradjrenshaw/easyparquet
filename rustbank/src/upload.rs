@@ -4,9 +4,9 @@ use csv_async::AsyncReaderBuilder;
 use mysql_async::{prelude::Queryable, Pool, Transaction, TxOpts};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use crate::{config, data::{Account, Data, User}, Config};
+use crate::data::{Data, Account, User};
+use crate::Config;
 use futures::StreamExt;
-use tokio_util::compat::TokioAsyncReadCompatExt;                                                                      
 
 async fn check_files(paths: &Vec<PathBuf>) -> Result<()> {
     for p in paths {
