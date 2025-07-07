@@ -443,6 +443,8 @@ mod tests {
         #[test_case(mysql_column_type::MYSQL_TYPE_FLOAT, false, DataType::Float32; "Float column type")]
         #[test_case(mysql_column_type::MYSQL_TYPE_NEWDECIMAL, false, DataType::Decimal128(19, 2); "Signed decimal column type")]
         #[test_case(mysql_column_type::MYSQL_TYPE_NEWDECIMAL, true, DataType::Decimal128(19, 2); "Unsigned decimal column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_DATE, false, DataType::Date32; "Date column type")]
+        #[test_case(mysql_column_type::MYSQL_TYPE_DATETIME, false, DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None); "DateTime column type")]
         
         $test_function
                 )+
